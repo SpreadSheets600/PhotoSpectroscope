@@ -1006,17 +1006,17 @@ def generate_plot():
 
 root = tk.Tk()
 root.title("Spectroscopy")
-
+    
 width = 600
 height = 600
 
 root.geometry(f"{width}x{height}")
-root.iconbitmap(r"C:\Users\SOHAM\Desktop\Science Exhibition\Final Code\App.ico")
+root.iconbitmap(r"\App.ico")
 root.resizable(width=False, height=False)
 
 # Tkinter Theme
 
-root.tk.call("source", r"C:\Users\SOHAM\Desktop\Science Exhibition\Theme\azure.tcl")
+root.tk.call("source", r"\Theme\azure.tcl")
 root.tk.call("set_theme", "dark")
 
 # Code To Add The Background Image
