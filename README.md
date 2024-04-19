@@ -230,3 +230,5 @@ reference = [  # Your reference data
 - `transmittance(reference, sample)`: Calculates transmittance.
 - `absorbance(reference, sample)`: Calculates absorbance.
 - `reflectance(reference, sample)`: Calculates reflectance.
+
+-------
