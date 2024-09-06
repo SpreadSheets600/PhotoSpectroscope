@@ -11,6 +11,7 @@ from tkinter import ttk
 
 import cv2
 
+from matplotlib import colors
 import matplotlib.image as img
 import matplotlib.patches as mpatches
 
