@@ -7,7 +7,8 @@ import numpy as np
 from PIL import Image
 from PIL import ImageDraw
 
-import customtkinter as tk
+import tkinter as tk
+import customtkinter as ctk
 from tkinter import filedialog
 
 from matplotlib import colors
@@ -16,11 +17,13 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from mpl_toolkits.mplot3d import Axes3D
 
+from scipy.stats import zscore
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
 saveFilename = None
+
 
 def capture():
     global rlable
@@ -111,6 +114,19 @@ def absorbance(reference, sample):
             absorbance.append(-math.log(sample[i] / reference[i], 10) / 5)
 
     return absorbance
+
+
+def transmittance(reference, sample):
+
+    transmittance = []
+
+    for i in range(len(sample)):
+        if sample[i] == 0:
+            transmittance.append(0)
+        else:
+            transmittance.append(sample[i] / reference[i])
+
+    return transmittance
 
 
 pixel = [115, 146, 193, 250, 312, 329, 404]
@@ -759,9 +775,27 @@ reference = [
 ]
 
 
+def remove_outliers(x_values, y_values, threshold=2):
+
+    z_scores = zscore(y_values)  # Calculate Z-scores for y values
+    filter_mask = (
+        np.abs(z_scores) < threshold
+    )  # Create a boolean mask where Z-scores < threshold
+
+    # Filter out x and y values based on Z-score threshold
+    cleaned_x = np.array(x_values)[filter_mask]
+    cleaned_y = np.array(y_values)[filter_mask]
+
+    return cleaned_x, cleaned_y
+
+
 def plot_spectrum_with_regression(
-    x_values, y_values, title, xlabel, ylabel, saveFilename
+    x_values, y_values, title, xlabel, ylabel, saveFilename, remove_outliers_flag=False
 ):
+
+    # Optionally remove outliers
+    if remove_outliers_flag:
+        x_values, y_values = remove_outliers(x_values, y_values)
 
     # Create Scatter Plot
     plt.scatter(x_values, y_values, color="blue", label="Data Points")
@@ -790,7 +824,7 @@ def plot_spectrum_with_regression(
     plt.show()
 
 
-def absorbance_with_regression():
+def absorbance_with_regression(remove_outliers_flag=False):
     global saveFilename
 
     # Capture The Reference Spectrum
@@ -803,7 +837,7 @@ def absorbance_with_regression():
     params = np.polyfit(pixel, wavelength, 3)
     nmAxis = np.polyval(params, range(len(spectrum)))
 
-    # Plot Absorbance Spectrum With Regression
+    # Plot Absorbance Spectrum With Regression and Optional Outlier Removal
     plot_spectrum_with_regression(
         nmAxis,
         absorbances,
@@ -811,10 +845,36 @@ def absorbance_with_regression():
         "Wavelength (nm)",
         "Absorbance",
         saveFilename,
+        remove_outliers_flag,
     )
 
 
-def reflectance_with_regression():
+def transmitance_with_regression(remove_outliers_flag=False):
+    global saveFilename
+
+    # Capture The Reference Spectrum
+    spectrum = capture()
+
+    # Calculate The Transmitance Spectrum And Normalize It
+    transmitances = normalise(transmittance(reference, spectrum))
+
+    # Get Wavelength Axis With Regression
+    params = np.polyfit(pixel, wavelength, 3)
+    nmAxis = np.polyval(params, range(len(spectrum)))
+
+    # Plot Transmitance Spectrum With Regression and Optional Outlier Removal
+    plot_spectrum_with_regression(
+        nmAxis,
+        transmitances,
+        "Transmitance Spectrum",
+        "Wavelength (nm)",
+        "Transmitance",
+        saveFilename,
+        remove_outliers_flag,
+    )
+
+
+def reflectance_with_regression(remove_outliers_flag=False):
     global saveFilename
 
     # Capture The Reference Spectrum
@@ -827,7 +887,7 @@ def reflectance_with_regression():
     params = np.polyfit(pixel, wavelength, 3)
     nmAxis = np.polyval(params, range(len(spectrum)))
 
-    # Plot Reflectance Spectrum With Regression
+    # Plot Reflectance Spectrum With Regression and Optional Outlier Removal
     plot_spectrum_with_regression(
         nmAxis,
         reflectances,
@@ -835,46 +895,174 @@ def reflectance_with_regression():
         "Wavelength (nm)",
         "Reflectance",
         saveFilename,
+        remove_outliers_flag,
     )
 
 
 # ================================================================================================= #
 
-app = tk.CTk()
-app.title("Sprectrum Analysis")
 
-app.geometry("500x600")
-
-app_name = tk.CTkLabel(app, text="Spectrum Analysis", fg_color="transparent")
-file_name = tk.CTkEntry(app, placeholder_text="Enter Plot Name")
-
-def save_file_name():
-    global saveFilename
-
-    saveFilename = file_name.get()
-    print("Save File Name - ", saveFilename)
-
-init_code = tk.CTkButton(app, text="Initialize", command=save_file_name)
-
-app_name.pack()
-init_code.pack()
-file_name.pack()
+import tkinter as tk
+from tkinter import ttk
+import customtkinter as ctk
+import threading
+import time  # For simulating long-running tasks
 
 
-def optionmenu_callback(choice):
-    print("Selected - ", choice)
+class SpectrumAnalysisApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Spectrum Analysis")
+        self.geometry("500x500")
+        self.create_widgets()
 
-    if choice == "Reflectance":
-        reflectance_with_regression()
+    def create_widgets(self):
+        # Title Label
+        self.title_label = ctk.CTkLabel(
+            self, text="Spectrum Analysis", font=("Consolas", 24, "bold")
+        )
+        self.title_label.place(x=150, y=20)
 
-    elif choice == "Absorbance":
-        absorbance_with_regression()
+        # File Name Entry
+        self.file_name_entry = ctk.CTkEntry(
+            self, placeholder_text="Enter Plot Name", width=250
+        )
+        self.file_name_entry.place(x=50, y=100)
+
+        self.save_button = ctk.CTkButton(
+            self, text="Initialize", command=self.save_plot
+        )
+        self.save_button.place(x=320, y=100)
+
+        # Spectrum Type Menu
+        self.spectrum_type_var = tk.StringVar(value="Select Spectrum Type")
+        self.spectrum_type_menu = ctk.CTkOptionMenu(
+            self,
+            values=["Reflectance", "Absorbance", "Transmitance"],
+            command=self.spectrum_type_callback,
+            variable=self.spectrum_type_var,
+            state="disabled",
+        )
+        self.spectrum_type_menu.place(x=50, y=150)
+
+        # Remove Outliers Checkbox
+        self.remove_outliers_var = tk.StringVar(value="True")
+        self.remove_outliers_checkbox = ctk.CTkSwitch(
+            self,
+            text="Remove Outliers",
+            variable=self.remove_outliers_var,
+            onvalue="True",
+            offvalue="False",
+            state="disabled",
+        )
+        self.remove_outliers_checkbox.place(x=320, y=150)
+
+        # Capture & Analyze Button
+        self.capture_button = ctk.CTkButton(
+            self,
+            text="Capture & Analyze",
+            command=self.capture_and_analyze,
+            state="disabled",
+        )
+        self.capture_button.place(x=50, y=200)
+
+        # Log Frame
+        self.log_frame = ctk.CTkFrame(self, width=405, height=100)
+        self.log_frame.place(x=50, y=250)
+
+        # Status Label
+        self.status_label = ctk.CTkLabel(self.log_frame, text="")
+        self.status_label.place(x=10, y=10)
+
+        # Progress Bar
+        self.progress_bar = ctk.CTkProgressBar(
+            self.log_frame, orientation="horizontal", mode="indeterminate", width=405
+        )
+        self.progress_bar.place(x=0, y=90)
+
+        # Theme Selection Dropdown
+        self.theme_var = tk.StringVar(value="Dark")
+        self.theme_menu = ctk.CTkOptionMenu(
+            self,
+            values=["Dark", "Light"],
+            command=self.change_theme,
+            variable=self.theme_var,
+        )
+        self.theme_menu.place(x=50, y=400)
+
+    def spectrum_type_callback(self, choice):
+        print(f"[ - ] Spectrum Type : {choice}")
+
+    def capture_and_analyze(self):
+        spectrum_type = self.spectrum_type_var.get()
+        remove_outliers = self.remove_outliers_var.get()
+
+        if not self.file_name_entry.get():
+            self.status_label.configure(
+                text="Please Enter a Plot Name Before Capturing and Analyzing"
+            )
+            return
+
+        global saveFilename
+        saveFilename = self.file_name_entry.get() + ".png"
+
+        spectrum_type = self.spectrum_type_var.get()
+        remove_outliers_flag = self.remove_outliers_var.get() == "True"
+
+        self.status_label.configure(text="Capturing And Analyzing...")
+        self.progress_bar.start()  # Start the progress bar
+
+        # Simulate a long-running task with threading
+        self.thread = threading.Thread(
+            target=self.analyze_spectrum, args=(spectrum_type, remove_outliers_flag)
+        )
+        self.thread.start()
+
+    def analyze_spectrum(self, spectrum_type, remove_outliers_flag):
+        
+
+        if spectrum_type == "Reflectance":
+            print("[ - ] Analyzing Reflectance Spectrum")
+            reflectance_with_regression(remove_outliers_flag)
+
+        elif spectrum_type == "Absorbance":
+            print("[ - ] Analyzing Absorbance Spectrum")
+            absorbance_with_regression(remove_outliers_flag)
+
+        elif spectrum_type == "Transmitance":
+            print("[ - ] Analyzing Transmitance Spectrum")
+            transmitance_with_regression(remove_outliers_flag)
+
+        time.sleep(3)  # Simulate long-running task
+
+        # Analysis complete
+        self.after(0, self.on_analysis_complete)
+
+    def on_analysis_complete(self):
+        self.progress_bar.stop()  # Stop the progress bar
+        self.status_label.configure(text="Analysis Complete !")
+
+    def change_theme(self, choice):
+        ctk.set_appearance_mode(choice)
+        self.theme_var.set(choice)
+        print(f"[ - ] Theme changed To : {choice}")
+
+    def save_plot(self):
+        file_name = self.file_name_entry.get()
+
+        self.spectrum_type_menu.configure(state="normal")
+        self.remove_outliers_checkbox.configure(state="normal")
+        self.capture_button.configure(state="normal")
+
+        if not file_name:
+            self.status_label.configure(text="Please Enter A Plot Name")
+            return
+
+        global saveFilename
+        saveFilename = file_name + ".png"
+        self.status_label.configure(text=f"Plot Will Saved As : {saveFilename}")
 
 
-optionmenu = tk.CTkOptionMenu(
-    app, values=["Reflectance", "Absorbance"], command=optionmenu_callback
-)
-optionmenu.set("Select Spectrum Type")
-optionmenu.pack()
-
-app.mainloop()
+if __name__ == "__main__":
+    app = SpectrumAnalysisApp()
+    app.mainloop()
