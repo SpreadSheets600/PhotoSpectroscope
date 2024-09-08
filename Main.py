@@ -2,14 +2,21 @@ import os
 import cv2
 
 import math
+import time
 import numpy as np
 
 from PIL import Image
 from PIL import ImageDraw
 
+import threading
 import tkinter as tk
+from tkinter import ttk
 import customtkinter as ctk
 from tkinter import filedialog
+
+import matplotlib
+
+matplotlib.use("Agg")
 
 from matplotlib import colors
 import matplotlib.image as img
@@ -17,10 +24,13 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from mpl_toolkits.mplot3d import Axes3D
 
+from scipy import stats
 from scipy.stats import zscore
 from sklearn.cluster import KMeans
+from sklearn.linear_model import HuberRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 
 saveFilename = None
 
@@ -129,6 +139,8 @@ def transmittance(reference, sample):
     return transmittance
 
 
+threshold = 0.03
+actual_labels = [0, 0, 1, 0, 1, 0, 1]
 pixel = [115, 146, 193, 250, 312, 329, 404]
 wavelength = [405.4, 436.6, 487.7, 546.5, 611.6, 631.1, 708]
 reference = [
@@ -775,53 +787,45 @@ reference = [
 ]
 
 
-def remove_outliers(x_values, y_values, threshold=2):
-
-    z_scores = zscore(y_values)  # Calculate Z-scores for y values
-    filter_mask = (
-        np.abs(z_scores) < threshold
-    )  # Create a boolean mask where Z-scores < threshold
-
-    # Filter out x and y values based on Z-score threshold
-    cleaned_x = np.array(x_values)[filter_mask]
-    cleaned_y = np.array(y_values)[filter_mask]
-
-    return cleaned_x, cleaned_y
+def remove_outliers(x_values, y_values, threshold=2.5):
+    z_scores = np.abs(stats.zscore(y_values))
+    filter_mask = z_scores < threshold
+    return np.array(x_values)[filter_mask], np.array(y_values)[filter_mask]
 
 
 def plot_spectrum_with_regression(
     x_values, y_values, title, xlabel, ylabel, saveFilename, remove_outliers_flag=False
 ):
-
-    # Optionally remove outliers
     if remove_outliers_flag:
         x_values, y_values = remove_outliers(x_values, y_values)
 
-    # Create Scatter Plot
-    plt.scatter(x_values, y_values, color="blue", label="Data Points")
+    # Create figure and axis objects
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Reshape X Values For Linear Regression
+    # Scatter plot
+    ax.scatter(x_values, y_values, color="blue", label="Data Points", alpha=0.5)
+
+    # Reshape X values for regression
     x_values_reshaped = np.array(x_values).reshape(-1, 1)
 
-    # Perform Linear Regression
-    reg = LinearRegression().fit(x_values_reshaped, y_values)
+    # Perform robust regression
+    huber = HuberRegressor()
+    huber.fit(x_values_reshaped, y_values)
+    y_pred = huber.predict(x_values_reshaped)
 
-    # Predict The Y Values Using The Best Fit Line
-    y_pred = reg.predict(x_values_reshaped)
+    # Plot regression line
+    ax.plot(x_values, y_pred, color="red", label="Regression Line")
 
-    # Plot Best Fit Line
-    plt.plot(x_values, y_pred, color="red", label="Best Fit Line")
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
+    ax.set_xlim(min(x_values), max(x_values))
+    ax.set_ylim(min(y_values) - 0.1, max(y_values) + 0.1)
 
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-
-    plt.legend()
-    plt.xlim(min(x_values), max(x_values))
-    plt.ylim(min(y_values) - 0.1, max(y_values) + 0.1)
-
+    plt.tight_layout()
     plt.savefig(saveFilename)
-    plt.show()
+    plt.close(fig)  # Close the figure to free up memory
 
 
 def absorbance_with_regression(remove_outliers_flag=False):
@@ -899,14 +903,89 @@ def reflectance_with_regression(remove_outliers_flag=False):
     )
 
 
+def classify_spectrum(spectrum, threshold):
+    # Classify the spectrum values into 1 (above threshold) or 0 (below threshold)
+    return [1 if value > threshold else 0 for value in spectrum]
+
+
+def evaluate_spectrum(predicted, actual):
+    # Ensure the lengths match
+    min_length = min(len(predicted), len(actual))
+    predicted = predicted[:min_length]
+    actual = actual[:min_length]
+
+    # Compute the confusion matrix, accuracy, and F1 score
+    cm = confusion_matrix(actual, predicted)
+    accuracy = accuracy_score(actual, predicted)
+    f1 = f1_score(actual, predicted)
+
+    return cm, accuracy, f1
+
+
+def reflectance_with_classification(reference, threshold, actual_labels):
+
+    sample = capture()
+
+    # Calculate Reflectance Spectrum
+    reflectances = normalise(reflectance(reference, sample))
+
+    # Classify the reflectance spectrum based on the threshold
+    predicted_labels = classify_spectrum(reflectances, threshold)
+
+    # Evaluate the predicted labels against actual labels
+    cm, accuracy, f1 = evaluate_spectrum(predicted_labels, actual_labels)
+
+    print("[ - ] Reflectance Evaluation:")
+    print(f"[ - ] Confusion Matrix:\n{cm}")
+    print(f"[ - ] Accuracy: {accuracy:.2f}")
+    print(f"[ - ] F1 Score: {f1:.2f}")
+
+    return cm, accuracy, f1
+
+
+def absorbance_with_classification(reference, threshold, actual_labels):
+
+    sample = capture()
+
+    # Calculate Absorbance Spectrum
+    absorbances = normalise(absorbance(reference, sample))
+
+    # Classify the absorbance spectrum based on the threshold
+    predicted_labels = classify_spectrum(absorbances, threshold)
+
+    # Evaluate the predicted labels against actual labels
+    cm, accuracy, f1 = evaluate_spectrum(predicted_labels, actual_labels)
+
+    print("[ - ] Absorbance Evaluation:")
+    print(f"[ - ] Confusion Matrix:\n{cm}")
+    print(f"[ - ] Accuracy: {accuracy:.2f}")
+    print(f"[ - ] F1 Score: {f1:.2f}")
+
+    return cm, accuracy, f1
+
+
+def transmitance_with_classification(reference, threshold, actual_labels):
+
+    sample = capture()
+
+    # Calculate Transmitance Spectrum
+    transmitance = normalise(transmittance(reference, sample))
+
+    # Classify the transmitance spectrum based on the threshold
+    predicted_labels = classify_spectrum(transmitance, threshold)
+
+    # Evaluate the predicted labels against actual labels
+    cm, accuracy, f1 = evaluate_spectrum(predicted_labels, actual_labels)
+
+    print("[ - ] Transmitance Evaluation:")
+    print(f"[ - ] Confusion Matrix:\n{cm}")
+    print(f"[ - ] Accuracy: {accuracy:.2f}")
+    print(f"[ - ] F1 Score: {f1:.2f}")
+
+    return cm, accuracy, f1
+
+
 # ================================================================================================= #
-
-
-import tkinter as tk
-from tkinter import ttk
-import customtkinter as ctk
-import threading
-import time  # For simulating long-running tasks
 
 
 class SpectrumAnalysisApp(ctk.CTk):
@@ -915,6 +994,7 @@ class SpectrumAnalysisApp(ctk.CTk):
         self.title("Spectrum Analysis")
         self.geometry("500x500")
         self.create_widgets()
+        self.camera_initialized = False  # Flag to check if the camera has warmed up
 
     def create_widgets(self):
         # Title Label
@@ -957,6 +1037,17 @@ class SpectrumAnalysisApp(ctk.CTk):
         )
         self.remove_outliers_checkbox.place(x=320, y=150)
 
+        self.with_classfication_var = tk.StringVar(value="True")
+        self.with_classfication_checkbox = ctk.CTkSwitch(
+            self,
+            text="With Classification",
+            variable=self.with_classfication_var,
+            onvalue="True",
+            offvalue="False",
+            state="disabled",
+        )
+        self.with_classfication_checkbox.place(x=320, y=200)
+
         # Capture & Analyze Button
         self.capture_button = ctk.CTkButton(
             self,
@@ -994,53 +1085,103 @@ class SpectrumAnalysisApp(ctk.CTk):
         print(f"[ - ] Spectrum Type : {choice}")
 
     def capture_and_analyze(self):
+        if not self.camera_initialized:
+            self.status_label.configure(text="Initializing Camera...")
+            self.progress_bar.start()
+            threading.Thread(
+                target=self.initialize_camera
+            ).start()  # Camera initialization in background
+        else:
+            self.start_analysis()
+
+    def initialize_camera(self):
+
+        time.sleep(2)
+        self.camera_initialized = True
+        self.progress_bar.stop()
+        self.status_label.configure(text="Camera initialized, ready to capture.")
+        self.start_analysis()
+
+    def start_analysis(self):
         spectrum_type = self.spectrum_type_var.get()
-        remove_outliers = self.remove_outliers_var.get()
+        remove_outliers_flag = self.remove_outliers_var.get() == "True"
 
         if not self.file_name_entry.get():
             self.status_label.configure(
-                text="Please Enter a Plot Name Before Capturing and Analyzing"
+                text="Please Enter a Plot Name Before Capturing and Analyzing",
             )
             return
 
         global saveFilename
         saveFilename = self.file_name_entry.get() + ".png"
 
-        spectrum_type = self.spectrum_type_var.get()
-        remove_outliers_flag = self.remove_outliers_var.get() == "True"
-
-        self.status_label.configure(text="Capturing And Analyzing...")
-        self.progress_bar.start()  # Start the progress bar
+        self.status_label.configure(text="Capturing and Analyzing...")
+        self.progress_bar.start()
 
         # Simulate a long-running task with threading
-        self.thread = threading.Thread(
+        threading.Thread(
             target=self.analyze_spectrum, args=(spectrum_type, remove_outliers_flag)
-        )
-        self.thread.start()
+        ).start()
 
     def analyze_spectrum(self, spectrum_type, remove_outliers_flag):
-        
+        global reference, threshold, actual_labels, saveFilename
 
-        if spectrum_type == "Reflectance":
-            print("[ - ] Analyzing Reflectance Spectrum")
-            reflectance_with_regression(remove_outliers_flag)
+        if self.with_classfication_var.get() == "True":
+            if spectrum_type == "Reflectance":
+                print("[ - ] Analyzing Reflectance Spectrum With Classification")
+                cm, accuracy, f1 = reflectance_with_classification(
+                    reference, threshold, actual_labels
+                )
+            elif spectrum_type == "Absorbance":
+                print("[ - ] Analyzing Absorbance Spectrum With Classification")
+                cm, accuracy, f1 = absorbance_with_classification(
+                    reference, threshold, actual_labels
+                )
+            elif spectrum_type == "Transmitance":
+                print("[ - ] Analyzing Transmitance Spectrum With Classification")
+                cm, accuracy, f1 = transmitance_with_classification(
+                    reference, threshold, actual_labels
+                )
 
-        elif spectrum_type == "Absorbance":
-            print("[ - ] Analyzing Absorbance Spectrum")
-            absorbance_with_regression(remove_outliers_flag)
+            self.after(0, lambda: self.display_classification_results(cm, accuracy, f1))
+        else:
+            spectrum = capture()
+            if spectrum_type == "Reflectance":
+                print("[ - ] Analyzing Reflectance Spectrum")
+                y_values = normalise(reflectance(reference, spectrum))
+            elif spectrum_type == "Absorbance":
+                print("[ - ] Analyzing Absorbance Spectrum")
+                y_values = normalise(absorbance(reference, spectrum))
+            elif spectrum_type == "Transmitance":
+                print("[ - ] Analyzing Transmitance Spectrum")
+                y_values = normalise(transmittance(reference, spectrum))
 
-        elif spectrum_type == "Transmitance":
-            print("[ - ] Analyzing Transmitance Spectrum")
-            transmitance_with_regression(remove_outliers_flag)
+            params = np.polyfit(pixel, wavelength, 3)
+            x_values = np.polyval(params, range(len(spectrum)))
 
-        time.sleep(3)  # Simulate long-running task
+            plot_spectrum_with_regression(
+                x_values,
+                y_values,
+                f"{spectrum_type} Spectrum",
+                "Wavelength (nm)",
+                spectrum_type,
+                saveFilename,
+                remove_outliers_flag,
+            )
 
-        # Analysis complete
-        self.after(0, self.on_analysis_complete)
+            self.after(0, self.on_analysis_complete)
+
+    def display_classification_results(self, cm, accuracy, f1):
+        result_text = f"Classification Results:\nAccuracy: {accuracy:.2f}\nF1 Score: {f1:.2f}\nConfusion Matrix:\n{cm}"
+        self.status_label.configure(text=result_text)
 
     def on_analysis_complete(self):
-        self.progress_bar.stop()  # Stop the progress bar
-        self.status_label.configure(text="Analysis Complete !")
+        self.progress_bar.stop()
+        self.status_label.configure(text="Analysis Complete! Plot saved.")
+
+        # Display the saved plot
+        img = Image.open(saveFilename)
+        img.show()
 
     def change_theme(self, choice):
         ctk.set_appearance_mode(choice)
@@ -1052,6 +1193,7 @@ class SpectrumAnalysisApp(ctk.CTk):
 
         self.spectrum_type_menu.configure(state="normal")
         self.remove_outliers_checkbox.configure(state="normal")
+        self.with_classfication_checkbox.configure(state="normal")
         self.capture_button.configure(state="normal")
 
         if not file_name:
@@ -1060,7 +1202,11 @@ class SpectrumAnalysisApp(ctk.CTk):
 
         global saveFilename
         saveFilename = file_name + ".png"
-        self.status_label.configure(text=f"Plot Will Saved As : {saveFilename}")
+        self.status_label.configure(text=f"Plot Will Be Saved As: {saveFilename}")
+
+    analyze_spectrum = analyze_spectrum
+    display_classification_results = display_classification_results
+    on_analysis_complete = on_analysis_complete
 
 
 if __name__ == "__main__":
