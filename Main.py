@@ -1,10 +1,9 @@
 import os
 import cv2
-
 import math
 import time
-import numpy as np
 
+import numpy as np
 from PIL import Image
 from PIL import ImageDraw
 
@@ -26,6 +25,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 from scipy import stats
 from scipy.stats import zscore
+
 from sklearn.cluster import KMeans
 from sklearn.linear_model import HuberRegressor
 from sklearn.preprocessing import StandardScaler
@@ -35,10 +35,23 @@ from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 saveFilename = None
 
 
-def capture():
-    global rlable
+cap = None  # Global variable to hold the camera object
 
+
+def initialize_camera():
+    global cap
     cap = cv2.VideoCapture(0)
+    # Wait for the camera to initialize
+    time.sleep(1)
+    return cap.isOpened()
+
+
+def capture():
+    global cap, rlable
+
+    if cap is None or not cap.isOpened():
+        print("Error: Camera Not Initialized")
+        return None
 
     roi_selected = False
     i_dist = []
@@ -70,16 +83,13 @@ def capture():
             cv2.imshow("Selected ROI", cropped)
 
         elif k & 0xFF == ord("q"):
-
             print("[ ? ] Exit Without Saving ?")
-
             i_dist = []
             break
 
         if not roi_selected:
             cv2.imshow("Frame", frame)
 
-    cap.release()
     cv2.destroyAllWindows()
 
     return i_dist
@@ -994,7 +1004,8 @@ class SpectrumAnalysisApp(ctk.CTk):
         self.title("Spectrum Analysis")
         self.geometry("500x500")
         self.create_widgets()
-        self.camera_initialized = False  # Flag to check if the camera has warmed up
+        self.camera_initialized = False
+        self.initialize_camera()
 
     def create_widgets(self):
         # Title Label
@@ -1086,21 +1097,25 @@ class SpectrumAnalysisApp(ctk.CTk):
 
     def capture_and_analyze(self):
         if not self.camera_initialized:
-            self.status_label.configure(text="Initializing Camera...")
-            self.progress_bar.start()
-            threading.Thread(
-                target=self.initialize_camera
-            ).start()  # Camera initialization in background
-        else:
-            self.start_analysis()
+            self.status_label.configure(
+                text="Camera not initialized. Please restart the application."
+            )
+            return
+        self.start_analysis()
 
     def initialize_camera(self):
+        self.status_label.configure(text="Initializing Camera...")
+        self.progress_bar.start()
+        threading.Thread(target=self._initialize_camera_thread).start()
 
-        time.sleep(2)
-        self.camera_initialized = True
+    def _initialize_camera_thread(self):
+        self.camera_initialized = initialize_camera()
         self.progress_bar.stop()
-        self.status_label.configure(text="Camera initialized, ready to capture.")
-        self.start_analysis()
+        if self.camera_initialized:
+            self.status_label.configure(text="Camera Initialized, Ready To Capture.")
+            self.capture_button.configure(state="normal")
+        else:
+            self.status_label.configure(text="Failed To Initialize The Camera.")
 
     def start_analysis(self):
         spectrum_type = self.spectrum_type_var.get()
@@ -1194,7 +1209,7 @@ class SpectrumAnalysisApp(ctk.CTk):
         self.spectrum_type_menu.configure(state="normal")
         self.remove_outliers_checkbox.configure(state="normal")
         self.with_classfication_checkbox.configure(state="normal")
-        self.capture_button.configure(state="normal")
+        # self.capture_button.configure(state="normal")
 
         if not file_name:
             self.status_label.configure(text="Please Enter A Plot Name")
