@@ -1048,7 +1048,7 @@ class SpectrumAnalysisApp(ctk.CTk):
         )
         self.remove_outliers_checkbox.place(x=320, y=150)
 
-        self.with_classfication_var = tk.StringVar(value="True")
+        self.with_classfication_var = tk.StringVar(value="False")
         self.with_classfication_checkbox = ctk.CTkSwitch(
             self,
             text="With Classification",
