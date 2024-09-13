@@ -1,6 +1,6 @@
-# Spectroscopy Analysis
+# Spectrum Analysis
 
-Analyze spectroscopy data captured from a live video feed. This program captures video frames and extracts spectral information.
+Analyze spectrum data captured from a live video feed. This program captures video frames and extracts spectral information.
 
 ## Table of Contents
 
